@@ -12,6 +12,15 @@ Forces agents to declare their plan before acting. Surfaces every micro-decision
 
 **Cockpit is the middle ground between "yolo" and "baby every command".**
 
+
+## Why a PM built this
+
+I'm Cathy — Senior PM at DiDi, pivoting to AI-native product. I started using Claude Code daily in early 2026 and hit the wall the HN comment above describes: either lose visibility ("yolo mode") or babysit every command. Neither works for product thinking.
+
+agent-cockpit operationalizes "human-in-the-loop" for the IDE-agent era. It's how I delegate to AI agents the way I delegate to a junior PM — explicit decision points, surfaced thinking, and the ability to redirect mid-flight.
+
+This is also my first major contribution to the AI agent infrastructure layer. If you're building agent products and want to compare notes on human-AI collaboration patterns, [open an issue](../../issues).
+
 ---
 
 ## ⚡ Quick Start（5 分钟 / 0 成本 / 中文友好）
@@ -351,3 +360,11 @@ Special call-out: Anthropic shipped Claude Code with a `userPromptKeywords.ts` r
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+## About the builder
+
+Built by **Cathy** ([@cathyzhang0905](https://github.com/cathyzhang0905)) — AI-native PM. Senior PM at DiDi, pivoting to AI-native product roles. I build tools at the intersection of [agent oversight](https://github.com/cathyzhang0905/agent-cockpit) and [personal information processing](https://github.com/cathyzhang0905).
+
+Interested in **agent collaboration / vertical agents / AI PM workflows / eval methodology**? Open an issue or reach me at [@cathyzhang0905](https://github.com/cathyzhang0905).
