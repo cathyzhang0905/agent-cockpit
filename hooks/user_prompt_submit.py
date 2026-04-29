@@ -42,11 +42,13 @@ DEEPSEEK_MODEL = "deepseek-chat"
 GLM_MODEL = "glm-4-flash"          # GLM-4-Flash is FREE
 KIMI_MODEL = "kimi-latest"
 MINIMAX_MODEL = "abab6.5s-chat"
+SILICONFLOW_MODEL = "Qwen/Qwen2.5-7B-Instruct"   # default; user can override via env
 
 DEFAULT_PROVIDER_CHAIN = [
-    "anthropic", "openai",                       # international
-    "deepseek", "qwen", "glm", "kimi", "minimax",  # Chinese
-    "ollama",                                    # local fallback
+    "anthropic", "openai",                                # international
+    "deepseek", "qwen", "glm", "kimi", "minimax",         # Chinese
+    "siliconflow",                                        # aggregator (free tier + many open models)
+    "ollama",                                             # local fallback
 ]
 
 # ----------------------------------------------------------------------------
@@ -480,6 +482,19 @@ def call_kimi_judge(prompt: str):
     )
 
 
+def call_siliconflow_judge(prompt: str):
+    """SiliconFlow (硅基流动) — OpenAI-compatible aggregator with Qwen/DeepSeek/Llama models.
+
+    Reads SILICONFLOW_API_KEY env var. Default model is Qwen/Qwen2.5-7B-Instruct
+    (cheap + Chinese-friendly). Override via SILICONFLOW_MODEL env var.
+    """
+    model = os.environ.get("SILICONFLOW_MODEL", SILICONFLOW_MODEL)
+    return _call_openai_compatible(
+        prompt, "SILICONFLOW_API_KEY",
+        "https://api.siliconflow.cn/v1", model,
+    )
+
+
 def call_minimax_judge(prompt: str):
     """MiniMax abab6.5s-chat (uses its own endpoint, OpenAI-style body)."""
     api_key = os.environ.get("MINIMAX_API_KEY")
@@ -560,6 +575,7 @@ PROVIDERS = {
     "glm": call_glm_judge,
     "kimi": call_kimi_judge,
     "minimax": call_minimax_judge,
+    "siliconflow": call_siliconflow_judge,
     "ollama": call_ollama_judge,
 }
 

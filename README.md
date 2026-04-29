@@ -222,6 +222,7 @@ Cockpit uses a 2-stage classifier for plan-worthy detection:
 | `glm` | `ZHIPU_API_KEY` | `glm-4-flash` | **FREE tier** | 智谱 AI, no cost option |
 | `kimi` | `MOONSHOT_API_KEY` | `kimi-latest` | very cheap | Moonshot AI, long context |
 | `minimax` | `MINIMAX_API_KEY` (+ `MINIMAX_GROUP_ID` optional) | `abab6.5s-chat` | very cheap | Chinese-focused |
+| `siliconflow` | `SILICONFLOW_API_KEY` | `Qwen/Qwen2.5-7B-Instruct` (default) | very cheap, free tier | 硅基流动，多开源模型聚合 |
 | `ollama` | None (local) | `llama3.2:3b` (default) | $0 | Fully offline + private |
 
 ### Provider precedence
