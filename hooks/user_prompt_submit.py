@@ -75,14 +75,18 @@ FILE_MOD_KEYWORDS = [
 
 
 def heuristic_judge(prompt: str) -> dict:
-    """Keyword + length heuristic. Returns decision: 'skip' | 'plan' | 'ambiguous'."""
+    """Keyword + length heuristic. Returns decision: 'skip' | 'plan' | 'ambiguous'.
+
+    Order matters: explicit keywords win over length-based heuristics.
+    Greeting at start with short length is the only "skip wins over keyword" case.
+    """
     p = prompt.strip()
     p_lower = p.lower()
     p_length = len(p)
 
-    # ---- Tier 1: Trivial signals ----
-
-    # Greeting/short ack at start
+    # ---- Tier 1a: Greeting at start + short → skip (always wins) ----
+    # Greetings like "hi" or "你好" should skip even if rest has keywords like
+    # "thank you for the research" — but only if very short overall (a real greeting).
     if p_length < 50:
         for start in TRIVIAL_STARTS:
             if p_lower.startswith(start.lower()):
@@ -91,16 +95,9 @@ def heuristic_judge(prompt: str) -> dict:
                     "reason": f"Heuristic trivial: starts with '{start}' (short)",
                 }
 
-    # Very short prompt (likely lookup or single-step)
-    if p_length < 20:
-        return {
-            "decision": "skip",
-            "reason": f"Heuristic trivial: short prompt ({p_length} chars)",
-        }
+    # ---- Tier 2: Plan keywords (explicit signals beat length) ----
 
-    # ---- Tier 2: Plan-worthy signals ----
-
-    # File modification (high confidence plan)
+    # File modification keywords (highest confidence)
     for kw in FILE_MOD_KEYWORDS:
         if kw in p_lower or kw in p:
             return {
@@ -124,6 +121,15 @@ def heuristic_judge(prompt: str) -> dict:
                 "reason": f"Heuristic plan: English keyword '{kw}'",
             }
 
+    # ---- Tier 1b: Length-based trivial (only if no plan keyword found) ----
+    # Very short prompt without any plan signal → likely lookup
+    if p_length < 20:
+        return {
+            "decision": "skip",
+            "reason": f"Heuristic trivial: short prompt ({p_length} chars, no keyword)",
+        }
+
+    # ---- Tier 3: Length-based plan signal ----
     # Long prompt without keywords — likely complex narrative
     if p_length > 100:
         return {
