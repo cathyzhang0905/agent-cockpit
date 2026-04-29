@@ -28,8 +28,15 @@ from datetime import datetime, timezone
 
 CONFIG_PATH = os.path.expanduser("~/.claude/cockpit.json")
 LOG_DIR_NAME = ".cockpit"
-HAIKU_MODEL = "claude-haiku-4-5"
-HAIKU_TIMEOUT_SECONDS = 5
+LLM_TIMEOUT_SECONDS = 5
+OLLAMA_TIMEOUT_SECONDS = 10  # local can be slower on first call
+
+# Multi-provider config
+ANTHROPIC_MODEL = "claude-haiku-4-5"
+OPENAI_MODEL = "gpt-4o-mini"
+OLLAMA_DEFAULT_MODEL = "llama3.2:3b"
+
+DEFAULT_PROVIDER_CHAIN = ["anthropic", "openai", "ollama"]
 
 # ----------------------------------------------------------------------------
 # Heuristic classifier (Plan B: works without API key)
@@ -147,7 +154,7 @@ def heuristic_judge(prompt: str) -> dict:
 # Haiku judge prompt (D4.5 — Conservative + 5 explicit triggers + reason log)
 # ----------------------------------------------------------------------------
 
-HAIKU_PROMPT = """You are a triage classifier for Claude Code task oversight (Cockpit).
+LLM_JUDGE_PROMPT = """You are a triage classifier for Claude Code task oversight (Cockpit).
 
 Given a user prompt (in any language, including Chinese), decide:
 does this task benefit from a structured plan before tool execution?
@@ -275,34 +282,91 @@ For WebSearch / WebFetch / Task / Edit / Write / NotebookEdit: Claude Code will 
 # ----------------------------------------------------------------------------
 
 
-def read_user_override() -> str:
-    """Read user override mode from global config. Returns 'auto' if missing."""
+def read_user_config() -> dict:
+    """Read full ~/.claude/cockpit.json. Returns empty dict if missing/invalid."""
     try:
         with open(CONFIG_PATH, encoding="utf-8") as f:
             data = json.load(f)
-            mode = data.get("mode", "auto")
-            if mode in ("auto", "on", "off"):
-                return mode
-            return "auto"
+            return data if isinstance(data, dict) else {}
     except (IOError, OSError, json.JSONDecodeError):
-        return "auto"
+        return {}
 
 
-def call_haiku_judge(prompt: str) -> dict:
-    """Call Haiku to classify task. R1: failures fall back to 'plan'."""
+def read_user_override() -> str:
+    """Read user override mode. Returns 'auto' if missing or invalid."""
+    config = read_user_config()
+    mode = config.get("mode", "auto")
+    if mode in ("auto", "on", "off"):
+        return mode
+    return "auto"
+
+
+def read_provider_chain() -> list:
+    """Read LLM provider chain from config. Returns default chain if missing."""
+    config = read_user_config()
+    chain = config.get("llm_providers", DEFAULT_PROVIDER_CHAIN)
+    if isinstance(chain, list) and chain:
+        return chain
+    return DEFAULT_PROVIDER_CHAIN
+
+
+# ----------------------------------------------------------------------------
+# LLM provider implementations
+# Each returns dict {"decision": "plan"|"skip", "reason": "..."} or None on failure
+# ----------------------------------------------------------------------------
+
+
+def parse_llm_response(text: str) -> dict:
+    """Parse LLM response (JSON-ish). Lenient — handles markdown fences + non-JSON."""
+    text = text.strip()
+    # Strip markdown code fence if present
+    if text.startswith("```"):
+        lines = text.split("\n")
+        if len(lines) > 2:
+            text = "\n".join(lines[1:-1])
+        elif text.endswith("```"):
+            text = text[3:-3].strip()
+
+    # Try strict JSON parse
+    try:
+        parsed = json.loads(text)
+        decision = parsed.get("decision", "plan")
+        if decision not in ("plan", "skip"):
+            decision = "plan"
+        return {
+            "decision": decision,
+            "reason": str(parsed.get("reason", ""))[:200],
+        }
+    except (json.JSONDecodeError, AttributeError):
+        pass
+
+    # Fallback: scan for "plan" or "skip" keyword in text
+    text_lower = text.lower()
+    has_plan = "plan" in text_lower
+    has_skip = "skip" in text_lower
+    if has_skip and not has_plan:
+        return {"decision": "skip", "reason": "Parsed from non-JSON LLM response"}
+    if has_plan and not has_skip:
+        return {"decision": "plan", "reason": "Parsed from non-JSON LLM response"}
+    # Both or neither — default plan (safe fallback)
+    return {
+        "decision": "plan",
+        "reason": "LLM response unparseable — defaulted to plan",
+    }
+
+
+def call_anthropic_judge(prompt: str):
+    """Call Anthropic Haiku. Returns None if no API key or call fails."""
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        return {
-            "decision": "plan",
-            "reason": "ANTHROPIC_API_KEY missing — fallback to plan (R1 conservative)",
-        }
+        return None
 
     body = json.dumps({
-        "model": HAIKU_MODEL,
+        "model": ANTHROPIC_MODEL,
         "max_tokens": 200,
         "messages": [{
             "role": "user",
-            "content": HAIKU_PROMPT.format(prompt=prompt),
+            "content": LLM_JUDGE_PROMPT.format(prompt=prompt),
         }],
     }).encode("utf-8")
 
@@ -317,26 +381,101 @@ def call_haiku_judge(prompt: str) -> dict:
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=HAIKU_TIMEOUT_SECONDS) as resp:
+        with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            text = data["content"][0]["text"].strip()
-            # Strip potential markdown code fence
-            if text.startswith("```"):
-                text = "\n".join(text.split("\n")[1:-1])
-            parsed = json.loads(text)
-            decision = parsed.get("decision", "plan")
-            if decision not in ("plan", "skip"):
-                decision = "plan"
-            return {
-                "decision": decision,
-                "reason": parsed.get("reason", "")[:200],
-            }
+            text = data["content"][0]["text"]
+            return parse_llm_response(text)
     except (urllib.error.URLError, urllib.error.HTTPError,
-            json.JSONDecodeError, KeyError, IndexError, TimeoutError, OSError) as e:
-        return {
-            "decision": "plan",
-            "reason": f"Haiku call failed: {str(e)[:80]} — fallback to plan",
-        }
+            json.JSONDecodeError, KeyError, IndexError, TimeoutError, OSError):
+        return None
+
+
+def call_openai_judge(prompt: str):
+    """Call OpenAI GPT-4o-mini. Returns None if no API key or call fails."""
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    body = json.dumps({
+        "model": OPENAI_MODEL,
+        "max_tokens": 200,
+        "messages": [{
+            "role": "user",
+            "content": LLM_JUDGE_PROMPT.format(prompt=prompt),
+        }],
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            text = data["choices"][0]["message"]["content"]
+            return parse_llm_response(text)
+    except (urllib.error.URLError, urllib.error.HTTPError,
+            json.JSONDecodeError, KeyError, IndexError, TimeoutError, OSError):
+        return None
+
+
+def call_ollama_judge(prompt: str):
+    """Call local Ollama. Returns None if Ollama not running."""
+    ollama_model = os.environ.get("OLLAMA_MODEL", OLLAMA_DEFAULT_MODEL)
+    ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+
+    body = json.dumps({
+        "model": ollama_model,
+        "messages": [{
+            "role": "user",
+            "content": LLM_JUDGE_PROMPT.format(prompt=prompt),
+        }],
+        "stream": False,
+        "options": {"num_predict": 200, "temperature": 0.0},
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        f"{ollama_host.rstrip('/')}/api/chat",
+        data=body,
+        headers={"Content-Type": "application/json"},
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT_SECONDS) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            text = data["message"]["content"]
+            return parse_llm_response(text)
+    except (urllib.error.URLError, urllib.error.HTTPError,
+            json.JSONDecodeError, KeyError, IndexError, TimeoutError, OSError):
+        return None
+
+
+# Provider registry
+PROVIDERS = {
+    "anthropic": call_anthropic_judge,
+    "openai": call_openai_judge,
+    "ollama": call_ollama_judge,
+}
+
+
+def call_llm_judge(prompt: str, providers_chain: list):
+    """Try providers in chain order. Returns (result, provider_name) or (None, None)."""
+    for provider_name in providers_chain:
+        provider_fn = PROVIDERS.get(provider_name)
+        if provider_fn is None:
+            continue
+        try:
+            result = provider_fn(prompt)
+            if result is not None:
+                return result, provider_name
+        except Exception:
+            continue
+    return None, None
 
 
 def write_log(cwd: str, entry: dict) -> None:
@@ -415,7 +554,7 @@ def main() -> None:
         decision = "plan"
         reason = "User override: /cockpit on (forces plan-worthy)"
         classifier = "override"
-    else:  # auto mode → Plan B: heuristic first, LLM fallback
+    else:  # auto mode → Plan B+C: heuristic first, multi-provider LLM fallback
         h = heuristic_judge(user_prompt)
         if h["decision"] in ("plan", "skip"):
             # Heuristic confident → use it directly (no API call)
@@ -423,17 +562,20 @@ def main() -> None:
             reason = h["reason"]
             classifier = "heuristic"
         else:
-            # Heuristic ambiguous → try Haiku if API key available
-            api_key = os.environ.get("ANTHROPIC_API_KEY")
-            if api_key:
-                judgment = call_haiku_judge(user_prompt)
-                decision = judgment["decision"]
-                reason = "Haiku (post-heuristic): " + judgment["reason"]
-                classifier = "haiku"
+            # Heuristic ambiguous → try LLM provider chain
+            providers_chain = read_provider_chain()
+            llm_result, used_provider = call_llm_judge(user_prompt, providers_chain)
+            if llm_result is not None:
+                decision = llm_result["decision"]
+                reason = f"LLM ({used_provider}): {llm_result['reason']}"
+                classifier = f"llm:{used_provider}"
             else:
-                # No API key → conservative fallback to plan
+                # All providers unavailable/failed → conservative fallback to plan
                 decision = "plan"
-                reason = "Heuristic ambiguous + no ANTHROPIC_API_KEY → fallback to plan"
+                reason = (
+                    f"Heuristic ambiguous + all LLM providers unavailable "
+                    f"({', '.join(providers_chain)}) → fallback to plan"
+                )
                 classifier = "fallback"
 
     # Log scenario_judge entry (with classifier type for v0.2 tune)

@@ -60,7 +60,9 @@ Cockpit's `./.cockpit/[date].jsonl` decision log uses an **event schema compatib
 ### Prerequisites
 
 - Claude Code installed and authenticated
-- `ANTHROPIC_API_KEY` environment variable set (for Haiku scenario classifier)
+- (Optional) An LLM API key for accurate scenario classification — see "LLM provider config" below
+
+**No API key required** — Cockpit uses heuristic classifier (keyword-based) by default and falls back to "plan-worthy" for ambiguous cases. LLM is optional for finer accuracy.
 
 ### Local development install
 
@@ -166,10 +168,83 @@ Plus `scenario_judge` entries from Haiku classifier.
 
 `~/.claude/cockpit.json`:
 ```json
-{ "mode": "auto" }
+{
+  "mode": "auto",
+  "llm_providers": ["anthropic", "openai", "ollama"]
+}
 ```
 
+- `mode` — `auto` (default) / `on` (force plan-first all tasks) / `off` (disable Cockpit)
+- `llm_providers` — order of LLM providers to try when heuristic is ambiguous. Default: `["anthropic", "openai", "ollama"]`
+
 Hook behavior is configured in `hooks/hooks.json` (matchers + script paths). Edit the `PreToolUse` matcher to extend / restrict which tools trigger Cockpit dialogs.
+
+## LLM provider config
+
+Cockpit uses a 2-stage classifier for plan-worthy detection:
+
+1. **Heuristic** (always runs, no API call) — keyword + length rules cover ~80% of prompts
+2. **LLM fallback** (optional) — when heuristic is ambiguous, try LLM providers in your configured chain
+
+### Supported providers
+
+| Provider | Env var needed | Model | Latency |
+|---|---|---|---|
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-haiku-4-5` | ~500ms-1s |
+| `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` | ~500ms |
+| `ollama` | None (local) | `llama3.2:3b` (default) | ~1-3s |
+
+### Provider precedence
+
+Cockpit tries each provider in the order specified in `llm_providers`. First one that succeeds wins. If a provider has no API key or service is down, it's skipped silently.
+
+**Default chain**: `anthropic → openai → ollama`. So:
+- If you have `ANTHROPIC_API_KEY` → uses Anthropic
+- Else if `OPENAI_API_KEY` → uses OpenAI
+- Else if Ollama running → uses local model
+- Else → conservative fallback to "plan" (works without any LLM)
+
+### Customize chain
+
+```json
+{
+  "llm_providers": ["openai", "ollama"]   // skip Anthropic, try OpenAI first
+}
+```
+
+```json
+{
+  "llm_providers": ["ollama"]              // local-only, no cloud
+}
+```
+
+```json
+{
+  "llm_providers": []                      // disable LLM entirely, heuristic + fallback only
+}
+```
+
+### Ollama setup (optional)
+
+If you want fully local LLM with no API key:
+
+```bash
+# Install Ollama: https://ollama.com/
+brew install ollama   # macOS
+
+# Start Ollama
+ollama serve
+
+# Pull a small model (in another terminal)
+ollama pull llama3.2:3b
+# or qwen2.5:3b for better Chinese support
+```
+
+Set custom Ollama config (optional):
+```bash
+export OLLAMA_HOST="http://localhost:11434"   # default
+export OLLAMA_MODEL="qwen2.5:3b"              # better for Chinese prompts
+```
 
 ---
 
