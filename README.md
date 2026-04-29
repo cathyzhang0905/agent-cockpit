@@ -1,8 +1,10 @@
 # Agent Cockpit
 
-> **Active oversight layer for Claude Code agents.**
+> **An active oversight layer (cockpit) for Claude Code agents — not an agent itself.**
 
-Forces agents to declare their plan before acting. Surfaces every micro-decision for human review. Makes agent thinking visible during execution. Pauses on critical choices so you can override.
+**Cockpit doesn't run your tasks.** Claude Code's agents do that. Cockpit is the **control surface that sits between you and them** — it forces agents to declare their plan before acting, surfaces every micro-decision for human review, makes agent thinking visible during execution, and pauses on critical choices so you can override.
+
+Think of it like a pilot's cockpit: the pilot still flies the plane, but the cockpit makes the plane controllable. Cockpit makes Claude Code agents controllable.
 
 ```
 > "AI tools are honestly unusable without running in yolo mode.
