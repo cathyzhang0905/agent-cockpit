@@ -1,0 +1,24 @@
+# Cockpit runtime data (per-cwd logs)
+.cockpit/
+
+# Local-only design artifacts (kept for personal reference, not for public repo)
+archived/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+
+# Node (in case future v0.2 adds web dashboard)
+node_modules/
+*.log

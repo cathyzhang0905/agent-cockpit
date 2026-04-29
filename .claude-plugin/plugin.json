@@ -1,0 +1,12 @@
+{
+  "name": "agent-cockpit",
+  "description": "Active oversight layer for Claude Code agents. Forces agents to declare their plan before acting, surfaces every micro-decision for human review, and pauses on critical choices so you can override.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Cathy Zhang",
+    "url": "https://github.com/cathyzhang0905"
+  },
+  "homepage": "https://github.com/cathyzhang0905/agent-cockpit",
+  "repository": "https://github.com/cathyzhang0905/agent-cockpit",
+  "license": "MIT"
+}
