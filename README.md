@@ -14,6 +14,31 @@ Forces agents to declare their plan before acting. Surfaces every micro-decision
 
 ---
 
+## ⚡ Quick Start（5 分钟 / 0 成本 / 中文友好）
+
+```bash
+# 1. Clone Cockpit
+git clone https://github.com/cathyzhang0905/agent-cockpit.git
+
+# 2. Make hooks executable
+cd agent-cockpit && chmod +x hooks/*.py
+
+# 3. Apply for a free GLM-4-Flash key (recommended — 完全免费)
+#    👉 https://open.bigmodel.cn/  (手机号注册即可，不需要信用卡)
+#    Then add to your shell:
+echo 'export ZHIPU_API_KEY="your-glm-key"' >> ~/.zshrc
+source ~/.zshrc
+
+# 4. Run Claude Code with Cockpit
+claude --plugin-dir /path/to/agent-cockpit
+```
+
+**That's it.** Now Cockpit auto-classifies your tasks (using GLM-4-Flash for the ambiguous ones) and surfaces decision points before tool execution.
+
+> 💡 **Why GLM-4-Flash?** 智谱 AI 的 GLM-4-Flash 模型完全免费，中文支持好，是 Cockpit 推荐的 zero-cost 上手路径。已有其他 LLM key（OpenAI / DeepSeek / Qwen / Kimi 等）也都直接支持——见下面 [LLM provider config](#llm-provider-config)。
+
+---
+
 ## Why this exists
 
 When you delegate a task to an AI agent, you lose access to its decision-making at exactly the moments when you most need to be involved.
