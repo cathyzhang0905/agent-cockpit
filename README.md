@@ -188,21 +188,46 @@ Cockpit uses a 2-stage classifier for plan-worthy detection:
 
 ### Supported providers
 
-| Provider | Env var needed | Model | Latency |
-|---|---|---|---|
-| `anthropic` | `ANTHROPIC_API_KEY` | `claude-haiku-4-5` | ~500ms-1s |
-| `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` | ~500ms |
-| `ollama` | None (local) | `llama3.2:3b` (default) | ~1-3s |
+| Provider | Env var needed | Model | Cost | Notes |
+|---|---|---|---|---|
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-haiku-4-5` | ~$0.0001/call | Same ecosystem as Claude Code |
+| `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` | ~$0.0001/call | Most common dev key |
+| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-chat` (V3) | very cheap | Strong CN/EN support |
+| `qwen` | `DASHSCOPE_API_KEY` | `qwen-turbo` | very cheap | Alibaba, strong Chinese |
+| `glm` | `ZHIPU_API_KEY` | `glm-4-flash` | **FREE tier** | 智谱 AI, no cost option |
+| `kimi` | `MOONSHOT_API_KEY` | `kimi-latest` | very cheap | Moonshot AI, long context |
+| `minimax` | `MINIMAX_API_KEY` (+ `MINIMAX_GROUP_ID` optional) | `abab6.5s-chat` | very cheap | Chinese-focused |
+| `ollama` | None (local) | `llama3.2:3b` (default) | $0 | Fully offline + private |
 
 ### Provider precedence
 
 Cockpit tries each provider in the order specified in `llm_providers`. First one that succeeds wins. If a provider has no API key or service is down, it's skipped silently.
 
-**Default chain**: `anthropic → openai → ollama`. So:
-- If you have `ANTHROPIC_API_KEY` → uses Anthropic
-- Else if `OPENAI_API_KEY` → uses OpenAI
-- Else if Ollama running → uses local model
-- Else → conservative fallback to "plan" (works without any LLM)
+**Default chain**: `anthropic → openai → deepseek → qwen → glm → kimi → minimax → ollama`. First with available auth wins. If none → conservative fallback to "plan" (Cockpit works without any LLM).
+
+**Recommended setup for Chinese users**:
+```bash
+# Free option — GLM-4-Flash from 智谱 AI
+# 1. Apply at https://open.bigmodel.cn/ (free tier, no credit card)
+echo 'export ZHIPU_API_KEY="your-key"' >> ~/.zshrc
+
+# Then config to prefer GLM:
+# ~/.claude/cockpit.json
+{ "llm_providers": ["glm", "ollama"] }
+```
+
+**Recommended setup for power users with multiple keys**:
+```bash
+# Set whichever you have:
+export ANTHROPIC_API_KEY="..."     # Anthropic
+export OPENAI_API_KEY="..."        # OpenAI
+export DEEPSEEK_API_KEY="..."      # DeepSeek
+export DASHSCOPE_API_KEY="..."     # Qwen
+export ZHIPU_API_KEY="..."         # GLM
+export MOONSHOT_API_KEY="..."      # Kimi
+export MINIMAX_API_KEY="..."       # MiniMax
+# Cockpit auto-uses the first one it finds in chain order
+```
 
 ### Customize chain
 

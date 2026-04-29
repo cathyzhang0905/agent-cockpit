@@ -36,7 +36,18 @@ ANTHROPIC_MODEL = "claude-haiku-4-5"
 OPENAI_MODEL = "gpt-4o-mini"
 OLLAMA_DEFAULT_MODEL = "llama3.2:3b"
 
-DEFAULT_PROVIDER_CHAIN = ["anthropic", "openai", "ollama"]
+# Chinese LLM providers (all OpenAI-compatible API except MiniMax)
+QWEN_MODEL = "qwen-turbo"
+DEEPSEEK_MODEL = "deepseek-chat"
+GLM_MODEL = "glm-4-flash"          # GLM-4-Flash is FREE
+KIMI_MODEL = "kimi-latest"
+MINIMAX_MODEL = "abab6.5s-chat"
+
+DEFAULT_PROVIDER_CHAIN = [
+    "anthropic", "openai",                       # international
+    "deepseek", "qwen", "glm", "kimi", "minimax",  # Chinese
+    "ollama",                                    # local fallback
+]
 
 # ----------------------------------------------------------------------------
 # Heuristic classifier (Plan B: works without API key)
@@ -390,14 +401,19 @@ def call_anthropic_judge(prompt: str):
         return None
 
 
-def call_openai_judge(prompt: str):
-    """Call OpenAI GPT-4o-mini. Returns None if no API key or call fails."""
-    api_key = os.environ.get("OPENAI_API_KEY")
+def _call_openai_compatible(prompt: str, api_key_env: str, base_url: str,
+                            model: str, timeout: int = LLM_TIMEOUT_SECONDS):
+    """Generic OpenAI-compatible provider helper.
+
+    Used for: OpenAI, DeepSeek, Qwen (compatible mode), GLM, Kimi/Moonshot.
+    Returns None if no API key or call fails.
+    """
+    api_key = os.environ.get(api_key_env)
     if not api_key:
         return None
 
     body = json.dumps({
-        "model": OPENAI_MODEL,
+        "model": model,
         "max_tokens": 200,
         "messages": [{
             "role": "user",
@@ -406,7 +422,87 @@ def call_openai_judge(prompt: str):
     }).encode("utf-8")
 
     req = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
+        f"{base_url.rstrip('/')}/chat/completions",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            text = data["choices"][0]["message"]["content"]
+            return parse_llm_response(text)
+    except (urllib.error.URLError, urllib.error.HTTPError,
+            json.JSONDecodeError, KeyError, IndexError, TimeoutError, OSError):
+        return None
+
+
+def call_openai_judge(prompt: str):
+    """OpenAI GPT-4o-mini."""
+    return _call_openai_compatible(
+        prompt, "OPENAI_API_KEY",
+        "https://api.openai.com/v1", OPENAI_MODEL,
+    )
+
+
+def call_deepseek_judge(prompt: str):
+    """DeepSeek deepseek-chat (V3)."""
+    return _call_openai_compatible(
+        prompt, "DEEPSEEK_API_KEY",
+        "https://api.deepseek.com/v1", DEEPSEEK_MODEL,
+    )
+
+
+def call_qwen_judge(prompt: str):
+    """Alibaba Qwen via DashScope OpenAI-compatible mode."""
+    return _call_openai_compatible(
+        prompt, "DASHSCOPE_API_KEY",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1", QWEN_MODEL,
+    )
+
+
+def call_glm_judge(prompt: str):
+    """Zhipu GLM-4-Flash (free tier)."""
+    return _call_openai_compatible(
+        prompt, "ZHIPU_API_KEY",
+        "https://open.bigmodel.cn/api/paas/v4", GLM_MODEL,
+    )
+
+
+def call_kimi_judge(prompt: str):
+    """Moonshot Kimi."""
+    return _call_openai_compatible(
+        prompt, "MOONSHOT_API_KEY",
+        "https://api.moonshot.cn/v1", KIMI_MODEL,
+    )
+
+
+def call_minimax_judge(prompt: str):
+    """MiniMax abab6.5s-chat (uses its own endpoint, OpenAI-style body)."""
+    api_key = os.environ.get("MINIMAX_API_KEY")
+    if not api_key:
+        return None
+
+    group_id = os.environ.get("MINIMAX_GROUP_ID", "")
+
+    body = json.dumps({
+        "model": MINIMAX_MODEL,
+        "max_tokens": 200,
+        "messages": [{
+            "role": "user",
+            "content": LLM_JUDGE_PROMPT.format(prompt=prompt),
+        }],
+    }).encode("utf-8")
+
+    url = "https://api.minimax.chat/v1/text/chatcompletion_v2"
+    if group_id:
+        url += f"?GroupId={group_id}"
+
+    req = urllib.request.Request(
+        url,
         data=body,
         headers={
             "Authorization": f"Bearer {api_key}",
@@ -455,10 +551,15 @@ def call_ollama_judge(prompt: str):
         return None
 
 
-# Provider registry
+# Provider registry — extend here to add new providers
 PROVIDERS = {
     "anthropic": call_anthropic_judge,
     "openai": call_openai_judge,
+    "deepseek": call_deepseek_judge,
+    "qwen": call_qwen_judge,
+    "glm": call_glm_judge,
+    "kimi": call_kimi_judge,
+    "minimax": call_minimax_judge,
     "ollama": call_ollama_judge,
 }
 
