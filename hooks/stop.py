@@ -79,15 +79,22 @@ def main() -> None:
         sys.exit(0)
 
     brief_body = matches[-1].strip()
+
+    # Skip if this looks like an instruction template (placeholders not filled in)
+    template_markers = [
+        "[paths]", "[1-2 decisions", "[the assumption]", "Decisions made: N",
+        "~Tmin", "[step]", "[tool]", "[one-line objective]",
+    ]
+    if any(marker in brief_body for marker in template_markers):
+        sys.exit(0)
+
     rendered = render_brief(brief_body)
     if not rendered:
         sys.exit(0)
 
+    # Stop hook output: use top-level systemMessage (Claude Code v2.1+ schema)
     output = {
-        "hookSpecificOutput": {
-            "hookEventName": "Stop",
-            "additionalContext": "\n" + rendered + "\n",
-        },
+        "systemMessage": rendered,
     }
     print(json.dumps(output))
     sys.exit(0)

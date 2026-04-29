@@ -279,6 +279,26 @@ def main() -> None:
         })
         sys.exit(0)
 
+    # Skip Cockpit for slash commands (explicit user invocation, not free-form task)
+    # e.g., /cockpit status, /help, /agent-cockpit:cockpit on
+    if user_prompt.lstrip().startswith("/"):
+        write_session_state(cwd, {
+            "session_id": session_id,
+            "current_scenario": "trivial",
+            "plan_required": False,
+            "last_prompt_at": now_iso,
+        })
+        write_log(cwd, {
+            "timestamp": now_iso,
+            "session_id": session_id,
+            "event_type": "scenario_judge",
+            "prompt_preview": user_prompt[:200],
+            "decision": "skip",
+            "reason": "Slash command — Cockpit skipped (explicit user invocation)",
+            "override_mode": override,
+        })
+        sys.exit(0)
+
     if override == "on":
         decision = "plan"
         reason = "User override: /cockpit on (forces plan-worthy)"
