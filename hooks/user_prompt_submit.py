@@ -32,6 +32,112 @@ HAIKU_MODEL = "claude-haiku-4-5"
 HAIKU_TIMEOUT_SECONDS = 5
 
 # ----------------------------------------------------------------------------
+# Heuristic classifier (Plan B: works without API key)
+# ----------------------------------------------------------------------------
+
+# Trivial start patterns (greetings/acks). Matched prefix-style, lowercase.
+TRIVIAL_STARTS = [
+    "hi", "hello", "hey", "yo", "你好", "您好", "哈喽",
+    "thanks", "thank you", "thx", "谢谢", "多谢",
+    "ok", "okay", "好的", "嗯", "知道了", "明白",
+    "bye", "再见",
+]
+
+# Plan-worthy keywords (Chinese)
+PLAN_KEYWORDS_ZH = [
+    # research / analysis
+    "调研", "研究", "分析", "比较", "对比", "评估", "审阅", "梳理",
+    "整理", "总结", "汇总", "复盘", "拆解", "深入",
+    # creation
+    "设计", "撰写", "写一份", "写一个", "生成", "创建", "构建", "搭建", "实现", "完善",
+    # search / find
+    "搜索", "查询", "查找", "找出", "列出", "罗列", "枚举", "找一下",
+    # modification
+    "修改", "编辑", "改写", "重构", "优化", "删除", "更新",
+    # action verbs
+    "帮我做", "帮我写", "帮我查", "帮我分析", "帮我整理", "帮我设计", "帮我对比",
+]
+
+# Plan-worthy keywords (English) — match lowercased
+PLAN_KEYWORDS_EN = [
+    "research", "analyze", "analyse", "compare", "investigate", "explore",
+    "evaluate", "audit", "review", "summarize", "summarise", "synthesize",
+    "design", "build", "create", "draft", "write a", "write an",
+    "implement", "develop", "refactor", "modify", "fix", "debug",
+    "find", "list", "search for", "look up", "look into",
+]
+
+# File modification keywords (both languages)
+FILE_MOD_KEYWORDS = [
+    "修改文件", "编辑文件", "改写", "改一下",
+    "edit", "modify", "refactor", "rewrite",
+]
+
+
+def heuristic_judge(prompt: str) -> dict:
+    """Keyword + length heuristic. Returns decision: 'skip' | 'plan' | 'ambiguous'."""
+    p = prompt.strip()
+    p_lower = p.lower()
+    p_length = len(p)
+
+    # ---- Tier 1: Trivial signals ----
+
+    # Greeting/short ack at start
+    if p_length < 50:
+        for start in TRIVIAL_STARTS:
+            if p_lower.startswith(start.lower()):
+                return {
+                    "decision": "skip",
+                    "reason": f"Heuristic trivial: starts with '{start}' (short)",
+                }
+
+    # Very short prompt (likely lookup or single-step)
+    if p_length < 20:
+        return {
+            "decision": "skip",
+            "reason": f"Heuristic trivial: short prompt ({p_length} chars)",
+        }
+
+    # ---- Tier 2: Plan-worthy signals ----
+
+    # File modification (high confidence plan)
+    for kw in FILE_MOD_KEYWORDS:
+        if kw in p_lower or kw in p:
+            return {
+                "decision": "plan",
+                "reason": f"Heuristic plan: file-mod keyword '{kw}'",
+            }
+
+    # Chinese plan keywords
+    for kw in PLAN_KEYWORDS_ZH:
+        if kw in p:
+            return {
+                "decision": "plan",
+                "reason": f"Heuristic plan: Chinese keyword '{kw}'",
+            }
+
+    # English plan keywords
+    for kw in PLAN_KEYWORDS_EN:
+        if kw in p_lower:
+            return {
+                "decision": "plan",
+                "reason": f"Heuristic plan: English keyword '{kw}'",
+            }
+
+    # Long prompt without keywords — likely complex narrative
+    if p_length > 100:
+        return {
+            "decision": "plan",
+            "reason": f"Heuristic plan: long prompt ({p_length} chars, no clear keyword)",
+        }
+
+    # ---- Ambiguous: defer to LLM if available ----
+    return {
+        "decision": "ambiguous",
+        "reason": f"Heuristic ambiguous: medium-length prompt ({p_length} chars), no keyword match",
+    }
+
+# ----------------------------------------------------------------------------
 # Haiku judge prompt (D4.5 — Conservative + 5 explicit triggers + reason log)
 # ----------------------------------------------------------------------------
 
@@ -302,12 +408,29 @@ def main() -> None:
     if override == "on":
         decision = "plan"
         reason = "User override: /cockpit on (forces plan-worthy)"
-    else:  # auto
-        judgment = call_haiku_judge(user_prompt)
-        decision = judgment["decision"]
-        reason = judgment["reason"]
+        classifier = "override"
+    else:  # auto mode → Plan B: heuristic first, LLM fallback
+        h = heuristic_judge(user_prompt)
+        if h["decision"] in ("plan", "skip"):
+            # Heuristic confident → use it directly (no API call)
+            decision = h["decision"]
+            reason = h["reason"]
+            classifier = "heuristic"
+        else:
+            # Heuristic ambiguous → try Haiku if API key available
+            api_key = os.environ.get("ANTHROPIC_API_KEY")
+            if api_key:
+                judgment = call_haiku_judge(user_prompt)
+                decision = judgment["decision"]
+                reason = "Haiku (post-heuristic): " + judgment["reason"]
+                classifier = "haiku"
+            else:
+                # No API key → conservative fallback to plan
+                decision = "plan"
+                reason = "Heuristic ambiguous + no ANTHROPIC_API_KEY → fallback to plan"
+                classifier = "fallback"
 
-    # Log scenario_judge entry
+    # Log scenario_judge entry (with classifier type for v0.2 tune)
     write_log(cwd, {
         "timestamp": now_iso,
         "session_id": session_id,
@@ -315,6 +438,7 @@ def main() -> None:
         "prompt_preview": user_prompt[:200],
         "decision": decision,
         "reason": reason,
+        "classifier": classifier,
         "override_mode": override,
     })
 
