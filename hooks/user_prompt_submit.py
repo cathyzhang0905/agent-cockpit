@@ -647,6 +647,45 @@ def main() -> None:
         })
         sys.exit(0)
 
+    # ack-preservation: if user is just confirming/continuing a previous plan-worthy
+    # task ("ok", "yes", "继续", "好的"), don't downgrade scenario state. This prevents
+    # multi-turn confirmation flows from killing Cockpit for the actual execution.
+    ACK_PATTERNS = [
+        "ok", "okay", "yes", "y", "yeah", "yep", "sure", "go", "do it",
+        "好", "好的", "确认", "继续", "可以", "对", "嗯", "行",
+    ]
+    p_stripped = user_prompt.strip().lower()
+    is_ack = (
+        len(p_stripped) <= 6 and
+        any(p_stripped == ack.lower() or p_stripped.startswith(ack.lower() + " ")
+            for ack in ACK_PATTERNS)
+    )
+
+    if is_ack:
+        # Read previous state — if was plan-worthy, preserve it
+        prev_state_path = os.path.join(cwd, LOG_DIR_NAME, "session-state.json")
+        try:
+            with open(prev_state_path, encoding="utf-8") as f:
+                prev_state = json.load(f)
+                if prev_state.get("current_scenario") == "plan-worthy":
+                    # Don't overwrite — preserve plan-worthy mode
+                    write_log(cwd, {
+                        "timestamp": now_iso,
+                        "session_id": session_id,
+                        "event_type": "scenario_judge",
+                        "prompt_preview": user_prompt[:200],
+                        "decision": "plan",
+                        "reason": f"ack-preservation: '{p_stripped}' is ack, prev scenario was plan-worthy",
+                        "classifier": "ack-preserve",
+                        "override_mode": override,
+                    })
+                    # Update last_prompt_at but keep scenario
+                    prev_state["last_prompt_at"] = now_iso
+                    write_session_state(cwd, prev_state)
+                    sys.exit(0)
+        except (IOError, OSError, json.JSONDecodeError):
+            pass  # fall through to normal flow
+
     # Skip Cockpit for slash commands (explicit user invocation, not free-form task)
     # e.g., /cockpit status, /help, /agent-cockpit:cockpit on
     if user_prompt.lstrip().startswith("/"):
